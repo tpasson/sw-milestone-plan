@@ -2,12 +2,17 @@
   <div class="app">
     <TheHeader
       :year="store.year"
+      :zoom="zoom"
       @prev-year="prevYear"
       @next-year="nextYear"
       @manage="manageOpen = true"
+      @zoom-in="zoom = Math.min(1.5, Math.round((zoom + 0.1) * 10) / 10)"
+      @zoom-out="zoom = Math.max(0.6, Math.round((zoom - 0.1) * 10) / 10)"
     />
 
     <MilestoneTable
+      :zoom="zoom"
+      :read-only="readOnly"
       @add-milestone="openAdd"
       @edit-milestone="openEdit"
     />
@@ -28,6 +33,8 @@
     <Transition name="modal">
       <ManageModal
         v-if="manageOpen"
+        :read-only="readOnly"
+        @update:readOnly="readOnly = $event"
         @close="manageOpen = false"
       />
     </Transition>
@@ -35,7 +42,7 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { reactive, ref, watch } from 'vue'
 import { useAppStore, store } from './stores/useAppStore.js'
 import TheHeader from './components/TheHeader.vue'
 import MilestoneTable from './components/MilestoneTable.vue'
@@ -45,6 +52,9 @@ import ManageModal from './components/ManageModal.vue'
 const { prevYear, nextYear } = useAppStore()
 
 const manageOpen = ref(false)
+const zoom = ref(1)
+const readOnly = ref(localStorage.getItem('atlas-readonly') === 'true')
+watch(readOnly, v => localStorage.setItem('atlas-readonly', v))
 
 const modal = reactive({
   show: false,

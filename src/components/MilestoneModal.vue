@@ -11,7 +11,7 @@
                   {{ swimlane?.name }}
                 </span>
                 <span v-if="subLane" class="panel-sub">{{ subLane.name }}</span>
-                <span class="panel-month">{{ MONTHS[month - 1] }} {{ year }}</span>
+                <span class="panel-month">{{ displayMonth }}</span>
               </div>
               <h2 class="panel-title">{{ mode === 'edit' ? 'Edit Milestone' : 'New Milestone' }}</h2>
               <button class="btn-close" @click="$emit('close')">
@@ -58,28 +58,62 @@
               </div>
 
               <div class="field">
-                <label class="field-label">When</label>
-                <input v-model="form.when" class="field-input" placeholder="e.g. End of Q1, Week 15 – specific date"/>
+                <label class="field-label">Date</label>
+                <input v-model="form.when" type="date" class="field-input field-date" />
               </div>
 
-              <!-- Links -->
+              <!-- Milestone Links -->
               <div class="field">
-                <label class="field-label">Links</label>
-                <div class="link-groups">
-                  <div v-for="group in SCENARIO_GROUPS" :key="group.label" class="link-group">
-                    <span class="link-group-label">{{ group.label }}</span>
-                    <div class="link-tags">
+                <label class="field-label">
+                  Linked Milestones
+                  <span v-if="localLinkedIds.size > 0" class="link-count">{{ localLinkedIds.size }}</span>
+                </label>
+                <div class="ms-picker">
+                  <div class="picker-search">
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon">
+                      <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.5"/>
+                      <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                    <input
+                      v-model="pickerSearch"
+                      class="picker-input"
+                      placeholder="Search milestones…"
+                      autocomplete="off"
+                    />
+                    <button
+                      v-if="pickerSearch"
+                      type="button"
+                      class="picker-clear"
+                      @click="pickerSearch = ''"
+                    >×</button>
+                  </div>
+                  <div class="picker-list">
+                    <template v-for="group in pickerGroups" :key="group.swimlane.id + '-' + (group.subLane?.id ?? 'root')">
+                      <div class="picker-group-header">
+                        <span class="picker-group-dot" :style="{ background: group.swimlane.color }"></span>
+                        {{ group.swimlane.name }}{{ group.subLane ? ' · ' + group.subLane.name : '' }}
+                      </div>
                       <button
-                        v-for="key in group.keys"
-                        :key="key"
+                        v-for="m in group.milestones"
+                        :key="m.id"
                         type="button"
-                        class="link-tag"
-                        :class="{ active: form.scenarios.includes(key) }"
-                        :style="form.scenarios.includes(key) ? activeTagStyle(swimlane?.color) : {}"
-                        @click="toggleScenario(key)"
+                        class="picker-item"
+                        :class="{ 'picker-active': localLinkedIds.has(m.id) }"
+                        :style="localLinkedIds.has(m.id) ? activePickerStyle(group.swimlane.color) : {}"
+                        @click="toggleLocalLink(m.id)"
                       >
-                        {{ SCENARIO_LABELS[key] }}
+                        <span class="picker-dot" :style="{ background: group.swimlane.color }"></span>
+                        <div class="picker-info">
+                          <span class="picker-title">{{ m.title }}</span>
+                          <span class="picker-meta">{{ MONTHS[m.month - 1] }} {{ m.year !== year ? m.year : '' }}</span>
+                        </div>
+                        <svg v-if="localLinkedIds.has(m.id)" class="picker-check" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                          <path d="M2.5 7L5.5 10L11.5 4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                        </svg>
                       </button>
+                    </template>
+                    <div v-if="pickerGroups.length === 0" class="picker-empty">
+                      {{ pickerSearch ? 'No milestones match your search' : 'No other milestones yet' }}
                     </div>
                   </div>
                 </div>
@@ -113,8 +147,8 @@
 </template>
 
 <script setup>
-import { reactive, ref, onMounted } from 'vue'
-import { useAppStore, MONTHS, SCENARIO_LABELS, SCENARIO_GROUPS } from '../stores/useAppStore.js'
+import { reactive, ref, computed, onMounted } from 'vue'
+import { useAppStore, MONTHS, store } from '../stores/useAppStore.js'
 
 const props = defineProps({
   mode:      { type: String,  default: 'add' },
@@ -126,53 +160,115 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close'])
-const { addMilestone, updateMilestone, deleteMilestone } = useAppStore()
+const { addMilestone, updateMilestone, deleteMilestone, addLink, removeLink, getLinkedIds } = useAppStore()
 
-const form = reactive({
-  title:     props.milestone?.title     ?? '',
-  what:      props.milestone?.what      ?? '',
-  why:       props.milestone?.why       ?? '',
-  how:       props.milestone?.how       ?? '',
-  who:       props.milestone?.who       ?? '',
-  when:      props.milestone?.when      ?? '',
-  scenarios: [...(props.milestone?.scenarios ?? [])],
+const defaultDate = `${props.year}-${String(props.month).padStart(2,'0')}-01`
+
+const displayMonth = computed(() => {
+  if (!form.when) return `${MONTHS[props.month - 1]} ${props.year}`
+  const parts = form.when.split('-')
+  const y = parseInt(parts[0], 10)
+  const m = parseInt(parts[1], 10)
+  return `${MONTHS[m - 1]} ${y}`
 })
 
-const titleInput = ref(null)
-onMounted(() => titleInput.value?.focus())
+const form = reactive({
+  title: props.milestone?.title ?? '',
+  what:  props.milestone?.what  ?? '',
+  why:   props.milestone?.why   ?? '',
+  how:   props.milestone?.how   ?? '',
+  who:   props.milestone?.who   ?? '',
+  when:  props.milestone?.when ?? defaultDate,
+})
 
-function toggleScenario(key) {
-  const i = form.scenarios.indexOf(key)
-  if (i === -1) form.scenarios.push(key)
-  else form.scenarios.splice(i, 1)
+// Local link state — Set of milestone IDs linked to this milestone
+const localLinkedIds = ref(new Set(
+  props.milestone ? getLinkedIds(props.milestone.id) : []
+))
+
+function toggleLocalLink(id) {
+  const next = new Set(localLinkedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  localLinkedIds.value = next
 }
 
-function activeTagStyle(color) {
+function activePickerStyle(color) {
   if (!color) return {}
   const r = parseInt(color.slice(1, 3), 16)
   const g = parseInt(color.slice(3, 5), 16)
   const b = parseInt(color.slice(5, 7), 16)
   return {
-    background: `rgba(${r},${g},${b},0.12)`,
-    borderColor: `rgba(${r},${g},${b},0.45)`,
-    color,
+    background: `rgba(${r},${g},${b},0.08)`,
+    borderLeft: `2px solid rgba(${r},${g},${b},0.5)`,
+  }
+}
+
+// Milestone picker search + grouping
+const pickerSearch = ref('')
+
+const pickerGroups = computed(() => {
+  const q = pickerSearch.value.toLowerCase()
+  const groups = []
+  for (const sw of store.swimlanes) {
+    const subs = sw.subLanes.length ? sw.subLanes : [null]
+    for (const sub of subs) {
+      const mils = store.milestones.filter(m => {
+        if (m.id === props.milestone?.id) return false
+        if (m.swimlaneId !== sw.id) return false
+        if (m.subLaneId !== (sub?.id ?? null)) return false
+        if (q && !m.title.toLowerCase().includes(q)) return false
+        return true
+      })
+      if (mils.length) groups.push({ swimlane: sw, subLane: sub, milestones: mils })
+    }
+  }
+  return groups
+})
+
+const titleInput = ref(null)
+onMounted(() => titleInput.value?.focus())
+
+function syncLinks(msId) {
+  const current = getLinkedIds(msId)
+  for (const id of localLinkedIds.value) {
+    if (!current.has(id)) addLink(msId, id)
+  }
+  for (const id of current) {
+    if (!localLinkedIds.value.has(id)) removeLink(msId, id)
   }
 }
 
 function submit() {
   if (!form.title.trim()) return
+
+  // Derive month/year from the picked date; fall back to props if no date
+  let month = props.month
+  let year  = props.year
+  if (form.when) {
+    const parts = form.when.split('-')
+    year  = parseInt(parts[0], 10)
+    month = parseInt(parts[1], 10)
+  }
+
   const payload = {
     swimlaneId: props.swimlane?.id,
     subLaneId:  props.subLane?.id ?? null,
-    year:       props.year,
-    month:      props.month,
-    ...form,
-    title: form.title.trim(),
+    year,
+    month,
+    title:      form.title.trim(),
+    what:       form.what,
+    why:        form.why,
+    how:        form.how,
+    who:        form.who,
+    when:       form.when,
   }
   if (props.mode === 'edit') {
     updateMilestone(props.milestone.id, payload)
+    syncLinks(props.milestone.id)
   } else {
-    addMilestone(payload)
+    const newMs = addMilestone(payload)
+    syncLinks(newMs.id)
   }
   emit('close')
 }
@@ -205,11 +301,10 @@ function remove() {
   width: 100%;
   max-width: 600px;
   max-height: 92vh;
-  overflow-y: auto;
   box-shadow: var(--sh-modal);
-  overflow: hidden;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .panel-header {
@@ -274,8 +369,18 @@ function remove() {
   font-size: 11.5px; font-weight: 600;
   color: var(--clr-text-2);
   text-transform: uppercase; letter-spacing: 0.4px;
+  display: flex; align-items: center; gap: 6px;
 }
 .req { color: var(--clr-danger); }
+
+.link-count {
+  font-size: 10px; font-weight: 700;
+  background: var(--clr-accent);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 100px;
+  letter-spacing: 0;
+}
 
 .field-input,
 .field-textarea {
@@ -299,49 +404,126 @@ function remove() {
 .field-input::placeholder,
 .field-textarea::placeholder { color: var(--clr-text-3); }
 
-/* Links */
-.link-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  background: var(--clr-bg);
+.field-date { color-scheme: light; cursor: pointer; }
+
+/* ── Milestone Picker ───────────────────────────────────────────────── */
+.ms-picker {
   border: 1.5px solid var(--clr-border);
   border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--clr-bg);
 }
 
-.link-group { display: flex; flex-direction: column; gap: 6px; }
+.picker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--clr-border-light);
+}
 
-.link-group-label {
+.search-icon { color: var(--clr-text-3); flex-shrink: 0; }
+
+.picker-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 13px;
+  color: var(--clr-text);
+  min-width: 0;
+}
+.picker-input::placeholder { color: var(--clr-text-3); }
+
+.picker-clear {
+  font-size: 16px;
+  color: var(--clr-text-3);
+  line-height: 1;
+  padding: 0 2px;
+  transition: color 0.1s;
+}
+.picker-clear:hover { color: var(--clr-text); }
+
+.picker-list {
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.picker-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px 4px;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--clr-text-3);
+  position: sticky;
+  top: 0;
+  background: var(--clr-bg);
+  z-index: 1;
 }
 
-.link-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.picker-group-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
 
-.link-tag {
-  font-size: 12px;
-  font-weight: 500;
-  padding: 4px 10px;
-  border-radius: 100px;
-  border: 1.5px solid var(--clr-border);
-  color: var(--clr-text-2);
-  background: var(--clr-surface);
+.picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 12px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background 0.12s;
+  text-align: left;
+  border-left: 2px solid transparent;
 }
-.link-tag:hover:not(.active) {
-  border-color: var(--clr-text-3);
-  color: var(--clr-text);
-}
-.link-tag.active {
-  font-weight: 600;
+.picker-item:hover { background: var(--clr-surface-2); }
+
+.picker-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
-/* Actions */
+.picker-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.picker-title {
+  font-size: 13px;
+  color: var(--clr-text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.picker-meta {
+  font-size: 11px;
+  color: var(--clr-text-3);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.picker-check { color: var(--clr-accent); flex-shrink: 0; }
+
+.picker-empty {
+  padding: 20px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--clr-text-3);
+}
+
+/* ── Actions ─────────────────────────────────────────────────────────── */
 .panel-actions {
   display: flex;
   align-items: center;

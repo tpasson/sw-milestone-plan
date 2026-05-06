@@ -1,6 +1,6 @@
 <template>
-  <div class="table-wrap">
-    <table class="ms-table" :class="{ 'has-focus': !!hoveredMs }">
+  <div class="table-wrap" :style="{ zoom }">
+    <table class="ms-table" :class="{ 'has-focus': !!hoveredMs, 'is-readonly': props.readOnly }">
       <thead>
         <tr>
           <th class="th-area">Area</th>
@@ -39,7 +39,7 @@
               :key="mi"
               class="td-month"
               :class="{ 'td-current': isCurrentMonth(mi + 1) }"
-              @click="onCellClick(row, mi + 1)"
+              @click="props.readOnly ? null : onCellClick(row, mi + 1)"
             >
               <div class="chips">
                 <div
@@ -50,7 +50,7 @@
                   :style="chipStyle(row.swimlane.color)"
                   @mouseenter="onChipEnter($event, m, row.swimlane.color)"
                   @mouseleave="onChipLeave"
-                  @click.stop="$emit('edit-milestone', m)"
+                  @click.stop="props.readOnly ? null : $emit('edit-milestone', m)"
                 >
                   {{ m.title }}
                 </div>
@@ -101,30 +101,23 @@
             <span class="tf-val">{{ tooltip.ms.who }}</span>
           </div>
           <div v-if="tooltip.ms.when" class="tooltip-field">
-            <span class="tf-label">When</span>
-            <span class="tf-val">{{ tooltip.ms.when }}</span>
+            <span class="tf-label">Date</span>
+            <span class="tf-val">{{ formatDate(tooltip.ms.when) }}</span>
           </div>
         </div>
-        <!-- Dependency badges -->
-        <div v-if="tooltip.ms.scenarios?.length" class="tooltip-links">
+        <!-- Linked milestones -->
+        <div v-if="linkedMilestones.length > 0" class="tooltip-links">
           <span class="tl-label">Linked to</span>
-          <div class="tl-badges">
-            <span
-              v-for="s in tooltip.ms.scenarios"
-              :key="s"
-              class="tl-badge"
-              :style="{ background: hexAlpha(tooltip.color, 0.12), color: tooltip.color, borderColor: hexAlpha(tooltip.color, 0.3) }"
-            >{{ SCENARIO_LABELS[s] ?? s }}</span>
+          <div class="tl-items">
+            <div v-for="lm in linkedMilestones.slice(0, 10)" :key="lm.id" class="tl-item">
+              <span class="tl-dot" :style="{ background: swimlaneColor(lm.swimlaneId) }"></span>
+              <span class="tl-title">{{ lm.title }}</span>
+              <span v-if="lm.when" class="tl-date">{{ formatDate(lm.when) }}</span>
+            </div>
+            <div v-if="linkedMilestones.length > 10" class="tl-more">
+              +{{ linkedMilestones.length - 10 }} more
+            </div>
           </div>
-        </div>
-        <div v-if="relatedCount > 0" class="tooltip-related-count">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <circle cx="2" cy="6" r="1.5" fill="currentColor"/>
-            <circle cx="10" cy="2" r="1.5" fill="currentColor"/>
-            <circle cx="10" cy="10" r="1.5" fill="currentColor"/>
-            <path d="M3.5 5.5L8.5 2.5M3.5 6.5L8.5 9.5" stroke="currentColor" stroke-width="1"/>
-          </svg>
-          {{ relatedCount }} linked milestone{{ relatedCount !== 1 ? 's' : '' }} highlighted
         </div>
       </div>
     </Transition>
@@ -133,10 +126,14 @@
 
 <script setup>
 import { computed, reactive, ref } from 'vue'
-import { useAppStore, MONTHS, SCENARIO_LABELS, store } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, store } from '../stores/useAppStore.js'
 
+const props = defineProps({
+  zoom: { type: Number, default: 1 },
+  readOnly: { type: Boolean, default: false },
+})
 const emit = defineEmits(['add-milestone', 'edit-milestone'])
-const { cellMilestones } = useAppStore()
+const { cellMilestones, getLinkedIds } = useAppStore()
 
 // ── Table rows ────────────────────────────────────────────────────────────────
 const tableRows = computed(() => {
@@ -187,30 +184,29 @@ const hoveredMs = ref(null)
 
 const relatedIds = computed(() => {
   if (!hoveredMs.value) return new Set()
-  const hm = hoveredMs.value
-  const tags = new Set(hm.scenarios ?? [])
-  const hoveredSwimlane = store.swimlanes.find(s => s.id === hm.swimlaneId)
-  const isCustomer = hoveredSwimlane?.name === 'Customer Accounts'
+  return getLinkedIds(hoveredMs.value.id)
+})
 
-  return new Set(
-    store.milestones
-      .filter(m => {
-        if (m.id === hm.id) return false
-        if (!(m.scenarios ?? []).some(t => tags.has(t))) return false
-        // When hovering a Customer milestone, only show non-customer milestones
-        // that already exist by that point in time (month <= hovered month)
-        if (isCustomer) {
-          const mSwimlane = store.swimlanes.find(s => s.id === m.swimlaneId)
-          const mIsCustomer = mSwimlane?.name === 'Customer Hunting'
-          if (!mIsCustomer && m.year === hm.year && m.month > hm.month) return false
-        }
-        return true
-      })
-      .map(m => m.id)
-  )
+const linkedMilestones = computed(() => {
+  if (!hoveredMs.value) return []
+  const ids = relatedIds.value
+  return store.milestones.filter(m => ids.has(m.id))
 })
 
 const relatedCount = computed(() => relatedIds.value.size)
+
+function swimlaneColor(swimlaneId) {
+  return store.swimlanes.find(s => s.id === swimlaneId)?.color ?? '#888'
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return ''
+  // Parse as local date to avoid timezone shifts
+  const [y, m, day] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, day).toLocaleDateString('en-US', {
+    day: 'numeric', month: 'long', year: 'numeric',
+  })
+}
 
 function chipState(m) {
   if (!hoveredMs.value) return ''
@@ -220,16 +216,22 @@ function chipState(m) {
 }
 
 // ── Tooltip ───────────────────────────────────────────────────────────────────
-const tooltip = reactive({ visible: false, ms: null, x: 0, y: 0, color: '' })
+const tooltip = reactive({ visible: false, ms: null, x: 0, chipTop: 0, chipBottom: 0, color: '' })
 let hideTimer = null
 
 const tooltipStyle = computed(() => {
   const margin = 12
   const tipW = 296
+  const estimatedHeight = 340
   const left = Math.min(tooltip.x, window.innerWidth - tipW - margin)
+  const spaceBelow = window.innerHeight - tooltip.chipBottom
+  const openUp = spaceBelow < estimatedHeight + margin
+
   return {
     position: 'fixed',
-    top: `${tooltip.y}px`,
+    ...(openUp
+      ? { bottom: `${window.innerHeight - tooltip.chipTop + 8}px`, top: 'auto' }
+      : { top: `${tooltip.chipBottom + 8}px`, bottom: 'auto' }),
     left: `${Math.max(margin, left)}px`,
     width: `${tipW}px`,
     zIndex: 9999,
@@ -241,7 +243,8 @@ function onChipEnter(e, m, color) {
   hoveredMs.value = m
   const rect = e.currentTarget.getBoundingClientRect()
   tooltip.x = rect.left
-  tooltip.y = rect.bottom + 8
+  tooltip.chipTop = rect.top
+  tooltip.chipBottom = rect.bottom
   tooltip.ms = m
   tooltip.color = color
   tooltip.visible = true
@@ -355,6 +358,12 @@ thead th {
   line-height: 1; pointer-events: none;
 }
 
+/* --- Read-only --- */
+.is-readonly .td-month { cursor: default; }
+.is-readonly .td-month:hover { background: var(--clr-surface); }
+.is-readonly .td-current:hover { background: rgba(0,113,227,0.03) !important; }
+.is-readonly .cell-add-hint { display: none; }
+
 /* --- Chips --- */
 .chips { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 
@@ -407,12 +416,12 @@ thead th {
 
 /* --- Tooltip --- */
 .ms-tooltip {
-  background: rgba(255,255,255,0.93);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(0,0,0,0.1);
+  background: rgba(240,244,255,0.28);
+  backdrop-filter: blur(28px) saturate(1.8);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8);
+  border: 1px solid rgba(255,255,255,0.70);
   border-radius: var(--r-lg);
-  box-shadow: var(--sh-lg);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
   overflow: hidden;
 }
 
@@ -434,17 +443,15 @@ thead th {
   padding: 8px 14px 10px;
   border-top: 1px solid var(--clr-border-light);
 }
-.tl-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); display: block; margin-bottom: 6px; }
-.tl-badges { display: flex; flex-wrap: wrap; gap: 4px; }
-.tl-badge {
-  font-size: 11px; font-weight: 500;
-  padding: 2px 8px; border-radius: 100px;
-  border: 1px solid;
+.tl-label {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--clr-text-3); display: block; margin-bottom: 6px;
 }
-
-.tooltip-related-count {
-  display: flex; align-items: center; gap: 5px;
-  padding: 6px 14px 10px;
-  font-size: 11px; color: var(--clr-text-3);
-}
+.tl-items { display: flex; flex-direction: column; gap: 5px; }
+.tl-item { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tl-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.tl-title { font-size: 12.5px; color: var(--clr-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-date { font-size: 11px; color: var(--clr-text-3); white-space: nowrap; margin-left: auto; padding-left: 8px; flex-shrink: 0; }
+.tl-more { font-size: 11px; color: var(--clr-text-3); padding-left: 12px; }
 </style>

@@ -29,6 +29,20 @@
         </button>
       </div>
 
+      <div class="zoom-nav">
+        <button class="year-btn" :disabled="zoom <= 0.6" @click="$emit('zoom-out')">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M2 6h8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <span class="year-label">{{ Math.round(zoom * 100) }}%</span>
+        <button class="year-btn" :disabled="zoom >= 1.5" @click="$emit('zoom-in')">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M6 2v8M2 6h8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+
       <div class="header-actions">
         <button class="btn-manage" @click="$emit('manage')">
           <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
@@ -44,8 +58,8 @@
 </template>
 
 <script setup>
-defineProps({ year: Number })
-defineEmits(['prev-year', 'next-year', 'manage'])
+defineProps({ year: Number, zoom: { type: Number, default: 1 } })
+defineEmits(['prev-year', 'next-year', 'manage', 'zoom-in', 'zoom-out'])
 </script>
 
 <style scoped>
@@ -98,6 +112,16 @@ defineEmits(['prev-year', 'next-year', 'manage'])
   letter-spacing: -0.2px;
 }
 
+
+.zoom-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 100px;
+  padding: 4px;
+}
 
 .year-nav {
   display: flex;
