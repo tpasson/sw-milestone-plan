@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "vite build && cd /tmp && rm -rf atlas-deploy && mkdir atlas-deploy && cd atlas-deploy && git init && git checkout --orphan gh-pages && cp -r /Users/thomaspasson/Development/sw-milestone-plan/dist/. . && git add -A && git commit -m 'Deploy: update build' && git remote add origin git@github.com:tpasson/sw-milestone-plan.git && git push origin gh-pages --force"
   },
   "dependencies": {
     "vue": "^3.5.13"
