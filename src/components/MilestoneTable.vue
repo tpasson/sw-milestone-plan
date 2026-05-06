@@ -101,7 +101,7 @@
             <span class="tf-val">{{ tooltip.ms.who }}</span>
           </div>
           <div v-if="tooltip.ms.when" class="tooltip-field">
-            <span class="tf-label">Date</span>
+            <span class="tf-label">When</span>
             <span class="tf-val">{{ formatDate(tooltip.ms.when) }}</span>
           </div>
         </div>
