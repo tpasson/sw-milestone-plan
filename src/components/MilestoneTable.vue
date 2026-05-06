@@ -1,6 +1,6 @@
 <template>
-  <div class="table-wrap" :style="{ zoom }">
-    <table class="ms-table" :class="{ 'has-focus': !!hoveredMs, 'is-readonly': props.readOnly }">
+  <div class="table-wrap">
+    <table class="ms-table" :class="{ 'has-focus': !!hoveredMs, 'is-readonly': props.readOnly }" :style="{ zoom: props.zoom }">
       <thead>
         <tr>
           <th class="th-area">Area</th>
