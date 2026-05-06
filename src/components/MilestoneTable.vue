@@ -347,7 +347,6 @@ thead th {
 .td-month:hover .cell-add-hint { opacity: 1; }
 .td-current {
   background: rgba(0,113,227,0.03) !important;
-  border-top: 2px solid rgba(0,113,227,0.25);
 }
 .td-current:hover { background: rgba(0,113,227,0.07) !important; }
 
