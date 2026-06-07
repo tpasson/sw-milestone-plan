@@ -1,6 +1,6 @@
 <template>
   <div class="table-wrap">
-    <table class="ms-table" :class="{ 'has-focus': !!hoveredMs, 'is-readonly': props.readOnly }" :style="{ zoom: props.zoom }">
+    <table class="ms-table" :class="{ 'has-focus': !!activeMs, 'is-readonly': props.readOnly }" :style="{ zoom: props.zoom }">
       <thead>
         <tr>
           <th class="th-area">Area</th>
@@ -48,9 +48,10 @@
                   class="chip"
                   :class="chipState(m)"
                   :style="chipStyle(row.swimlane.color)"
-                  @mouseenter="onChipEnter($event, m, row.swimlane.color)"
-                  @mouseleave="onChipLeave"
-                  @click.stop="props.readOnly ? null : $emit('edit-milestone', m)"
+                  @mouseenter="hoveredMs = m"
+                  @mouseleave="hoveredMs = null"
+                  @click.stop="onChipClick($event, m, row.swimlane.color)"
+                  @dblclick.stop="!props.readOnly && $emit('edit-milestone', m)"
                 >
                   {{ m.title }}
                 </div>
@@ -76,8 +77,7 @@
         v-if="tooltip.visible && tooltip.ms"
         class="ms-tooltip"
         :style="tooltipStyle"
-        @mouseenter="onTooltipEnter"
-        @mouseleave="onChipLeave"
+        @click.stop
       >
         <div class="tooltip-header">
           <span class="tooltip-dot" :style="{ background: tooltip.color }"></span>
@@ -93,7 +93,7 @@
             <span class="tf-val">{{ tooltip.ms.why }}</span>
           </div>
           <div v-if="tooltip.ms.how" class="tooltip-field">
-            <span class="tf-label">How</span>
+            <span class="tf-label">Where</span>
             <span class="tf-val">{{ tooltip.ms.how }}</span>
           </div>
           <div v-if="tooltip.ms.who" class="tooltip-field">
@@ -125,7 +125,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useAppStore, MONTHS, store } from '../stores/useAppStore.js'
 
 const props = defineProps({
@@ -179,21 +179,23 @@ function hexAlpha(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`
 }
 
-// ── Dependency hover ──────────────────────────────────────────────────────────
-const hoveredMs = ref(null)
+// ── Dependency highlighting ───────────────────────────────────────────────────
+const hoveredMs = ref(null)   // drives chip highlight on hover
+const selectedMs = ref(null)  // drives tooltip on click
+
+// active milestone for highlighting: hover takes priority over click
+const activeMs = computed(() => hoveredMs.value ?? selectedMs.value)
 
 const relatedIds = computed(() => {
-  if (!hoveredMs.value) return new Set()
-  return getLinkedIds(hoveredMs.value.id)
+  if (!activeMs.value) return new Set()
+  return getLinkedIds(activeMs.value.id)
 })
 
+// linked milestones for tooltip content always based on selectedMs
 const linkedMilestones = computed(() => {
-  if (!hoveredMs.value) return []
-  const ids = relatedIds.value
-  return store.milestones.filter(m => ids.has(m.id))
+  if (!selectedMs.value) return []
+  return store.milestones.filter(m => getLinkedIds(selectedMs.value.id).has(m.id))
 })
-
-const relatedCount = computed(() => relatedIds.value.size)
 
 function swimlaneColor(swimlaneId) {
   return store.swimlanes.find(s => s.id === swimlaneId)?.color ?? '#888'
@@ -201,7 +203,6 @@ function swimlaneColor(swimlaneId) {
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
-  // Parse as local date to avoid timezone shifts
   const [y, m, day] = dateStr.split('-').map(Number)
   return new Date(y, m - 1, day).toLocaleDateString('en-US', {
     day: 'numeric', month: 'long', year: 'numeric',
@@ -209,15 +210,14 @@ function formatDate(dateStr) {
 }
 
 function chipState(m) {
-  if (!hoveredMs.value) return ''
-  if (m.id === hoveredMs.value.id) return 'chip-active'
+  if (!activeMs.value) return ''
+  if (m.id === activeMs.value.id) return 'chip-active'
   if (relatedIds.value.has(m.id)) return 'chip-related'
   return 'chip-dimmed'
 }
 
 // ── Tooltip ───────────────────────────────────────────────────────────────────
 const tooltip = reactive({ visible: false, ms: null, x: 0, chipTop: 0, chipBottom: 0, color: '' })
-let hideTimer = null
 
 const tooltipStyle = computed(() => {
   const margin = 12
@@ -238,9 +238,13 @@ const tooltipStyle = computed(() => {
   }
 })
 
-function onChipEnter(e, m, color) {
-  clearTimeout(hideTimer)
-  hoveredMs.value = m
+function onChipClick(e, m, color) {
+  if (selectedMs.value?.id === m.id) {
+    selectedMs.value = null
+    tooltip.visible = false
+    return
+  }
+  selectedMs.value = m
   const rect = e.currentTarget.getBoundingClientRect()
   tooltip.x = rect.left
   tooltip.chipTop = rect.top
@@ -250,16 +254,27 @@ function onChipEnter(e, m, color) {
   tooltip.visible = true
 }
 
-function onChipLeave() {
-  hideTimer = setTimeout(() => {
-    tooltip.visible = false
-    hoveredMs.value = null
-  }, 200)
+function closeTooltip() {
+  tooltip.visible = false
+  selectedMs.value = null
 }
 
-function onTooltipEnter() {
-  clearTimeout(hideTimer)
+function onDocumentClick() {
+  if (tooltip.visible) closeTooltip()
 }
+
+function onKeyDown(e) {
+  if (e.key === 'Escape') closeTooltip()
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+  document.addEventListener('keydown', onKeyDown)
+})
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick)
+  document.removeEventListener('keydown', onKeyDown)
+})
 </script>
 
 <style scoped>

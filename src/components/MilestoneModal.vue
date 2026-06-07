@@ -48,8 +48,8 @@
 
               <div class="two-col">
                 <div class="field">
-                  <label class="field-label">How</label>
-                  <textarea v-model="form.how" class="field-textarea" rows="3" placeholder="How will it be implemented?"></textarea>
+                  <label class="field-label">Where</label>
+                  <textarea v-model="form.how" class="field-textarea" rows="3" placeholder="Where will it take place?"></textarea>
                 </div>
                 <div class="field">
                   <label class="field-label">Who</label>
